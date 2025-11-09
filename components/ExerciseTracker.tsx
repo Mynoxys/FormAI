@@ -90,9 +90,12 @@ const drawStickman = (ctx: CanvasRenderingContext2D, pose: Partial<PoseLandmarks
     const landmarkList = landmarkNames.map(name => pose[name as keyof PoseLandmarks]);
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 10;
+    ctx.lineWidth = 6;
     ctx.lineCap = 'round';
-    window.drawConnectors(ctx, landmarkList, BODY_CONNECTIONS, { color, lineWidth: 8 });
+
+    if (window.drawConnectors) {
+        window.drawConnectors(ctx, landmarkList, BODY_CONNECTIONS, { color, lineWidth: 6 });
+    }
 
     const leftShoulder = landmarkList[11];
     const rightShoulder = landmarkList[12];
@@ -103,15 +106,12 @@ const drawStickman = (ctx: CanvasRenderingContext2D, pose: Partial<PoseLandmarks
         const shoulderCenterX = (leftShoulder.x + rightShoulder.x) / 2;
         const shoulderCenterY = (leftShoulder.y + rightShoulder.y) / 2;
         const shoulderWidth = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
-        const headRadius = shoulderWidth > 5 ? shoulderWidth * 0.4 : 10;
+        const headRadius = shoulderWidth > 5 ? shoulderWidth * 0.4 : 20;
         const headCenterY = (leftEar && rightEar) ? (leftEar.y + rightEar.y) / 2 : shoulderCenterY - headRadius * 1.5;
         ctx.beginPath();
         ctx.arc(shoulderCenterX, headCenterY, headRadius, 0, 2 * Math.PI);
         ctx.closePath();
         ctx.fillStyle = color;
-        // Fix: Explicitly provide the fill rule to the fill() method. Some browser
-        // environments require this argument and will throw an error if it's missing.
-        // This error can be misattributed to other lines (like closePath) due to sourcemaps.
         ctx.fill('nonzero');
     }
 };
@@ -194,7 +194,7 @@ const ExerciseTracker: React.FC = () => {
     }, []);
 
     const animateCoach = useCallback((timestamp: number) => {
-        if (!coachCanvasRef.current || !selectedExercise || !userProportionsRef.current) {
+        if (!coachCanvasRef.current || !selectedExercise) {
             coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
             return;
         }
@@ -207,11 +207,9 @@ const ExerciseTracker: React.FC = () => {
         const animationDuration = 4000;
         const progress = (timestamp % animationDuration) / animationDuration;
         const t = (Math.sin(progress * 2 * Math.PI - Math.PI / 2) + 1) / 2;
-        
+
         const genericAnimatedPose = interpolatePose(config.upPose, config.downPose, t);
         genericCoachPoseRef.current = genericAnimatedPose;
-        
-        const userTorsoHeight = userProportionsRef.current.torsoHeight;
 
         const gPose = genericAnimatedPose;
         if (!gPose.LEFT_SHOULDER || !gPose.RIGHT_SHOULDER || !gPose.LEFT_HIP || !gPose.RIGHT_HIP) {
@@ -222,23 +220,19 @@ const ExerciseTracker: React.FC = () => {
         const gShoulderY = (gPose.LEFT_SHOULDER.y + gPose.RIGHT_SHOULDER.y) / 2;
         const gHipY = (gPose.LEFT_HIP.y + gPose.RIGHT_HIP.y) / 2;
         const gTorsoHeight = Math.abs(gShoulderY - gHipY);
-        
-        const targetTorsoHeightPixels = userTorsoHeight * coachCanvas.height;
-        const drawingScale = gTorsoHeight > 0 ? targetTorsoHeightPixels / gTorsoHeight : 0;
+
+        const scale = coachCanvas.height * 0.8;
 
         const finalCoachPose: Partial<PoseLandmarks> = {};
         for (const key in genericAnimatedPose) {
             const lm = genericAnimatedPose[key as keyof PoseLandmarks]!;
             finalCoachPose[key as keyof PoseLandmarks] = {
                 ...lm,
-                x: (lm.x - 0.5) * drawingScale + (coachCanvas.width / 2),
-                // Fix: The original vertical positioning (`* 0.8`) was flawed and pushed the
-                // coach's body off-screen. This corrects the math to properly center the
-                // coach's hips in the canvas, ensuring the full body is visible.
-                y: (lm.y - gHipY) * drawingScale + (coachCanvas.height / 2)
+                x: lm.x * scale,
+                y: lm.y * scale
             };
         }
-        
+
         coachCtx.clearRect(0, 0, coachCanvas.width, coachCanvas.height);
         drawStickman(coachCtx, finalCoachPose, '#00FFFF');
 
@@ -290,6 +284,10 @@ const ExerciseTracker: React.FC = () => {
     const handleSelectExercise = (exercise: ExerciseType) => {
         setSelectedExercise(exercise);
         setFeedback({ message: 'Get in position and start!', type: 'info' });
+        if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
+        setTimeout(() => {
+            coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
+        }, 100);
     };
 
     const handleRecalibrate = () => {
