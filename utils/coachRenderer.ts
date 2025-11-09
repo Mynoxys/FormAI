@@ -1,5 +1,17 @@
 import { BiomechanicalSquatPose } from './squatBiomechanics';
-import { CameraConfig, rotatePoint3D, projectWithPerspective, Point3D, Point2D } from './cameraSystem';
+import { CameraConfig, rotatePoint3D, Point3D, Point2D } from './cameraSystem';
+
+function projectOrthographic(
+    point: Point3D,
+    camera: CameraConfig
+): Point2D {
+    const rotated = rotatePoint3D(point, camera.rotationY, camera.rotationX);
+
+    return {
+        x: rotated.x,
+        y: rotated.y
+    };
+}
 
 function centerPoseOnCanvas(
     pose: BiomechanicalSquatPose,
@@ -7,49 +19,69 @@ function centerPoseOnCanvas(
     canvasHeight: number,
     camera: CameraConfig
 ): Record<string, Point2D> {
-    const scale = 1.5;
-
     const allLandmarks: Point3D[] = Object.values(pose);
 
-    let minY = Infinity;
-    let maxY = -Infinity;
-    let minX = Infinity;
-    let maxX = -Infinity;
+    const poseCenterX = allLandmarks.reduce((sum, lm) => sum + lm.x, 0) / allLandmarks.length;
+    const poseCenterY = allLandmarks.reduce((sum, lm) => sum + lm.y, 0) / allLandmarks.length;
 
-    allLandmarks.forEach(lm => {
-        if (lm.y < minY) minY = lm.y;
-        if (lm.y > maxY) maxY = lm.y;
-        if (lm.x < minX) minX = lm.x;
-        if (lm.x > maxX) maxX = lm.x;
-    });
-
-    const poseHeight = maxY - minY;
-    const poseWidth = maxX - minX;
-    const targetHeight = canvasHeight * scale;
-    const scaleFactor = poseHeight > 0 ? targetHeight / poseHeight : 1;
-
-    const poseCenterX = (minX + maxX) / 2;
-    const poseCenterY = (minY + maxY) / 2;
-
-    const projected: Record<string, Point2D> = {};
+    const tempProjected: Record<string, Point2D> = {};
 
     for (const [key, landmark] of Object.entries(pose)) {
-        const relativeX = (landmark.x - poseCenterX) * scaleFactor;
-        const relativeY = (landmark.y - poseCenterY) * scaleFactor;
+        const relativeX = landmark.x - poseCenterX;
+        const relativeY = landmark.y - poseCenterY;
 
         const point3D: Point3D = {
             x: relativeX,
             y: relativeY,
-            z: (landmark.z || 0) * scaleFactor
+            z: landmark.z || 0
         };
 
-        const rotated = rotatePoint3D(point3D, camera.rotationY, camera.rotationX);
-        const point2D = projectWithPerspective(rotated, camera, canvasWidth, canvasHeight);
-
-        projected[key] = point2D;
+        const point2D = projectOrthographic(point3D, camera);
+        tempProjected[key] = point2D;
     }
 
-    return projected;
+    const projectedPoints = Object.values(tempProjected);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    projectedPoints.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    });
+
+    const projectedWidth = maxX - minX;
+    const projectedHeight = maxY - minY;
+
+    const margin = 60;
+    const targetWidth = canvasWidth - (margin * 2);
+    const targetHeight = canvasHeight - (margin * 2);
+
+    const scaleX = projectedWidth > 0 ? targetWidth / projectedWidth : 1;
+    const scaleY = projectedHeight > 0 ? targetHeight / projectedHeight : 1;
+    const scale = Math.min(scaleX, scaleY) * 0.9;
+
+    const projectedCenterX = (minX + maxX) / 2;
+    const projectedCenterY = (minY + maxY) / 2;
+
+    const canvasCenterX = canvasWidth / 2;
+    const canvasCenterY = canvasHeight / 2;
+
+    const final: Record<string, Point2D> = {};
+    for (const [key, point] of Object.entries(tempProjected)) {
+        const scaledX = (point.x - projectedCenterX) * scale;
+        const scaledY = (point.y - projectedCenterY) * scale;
+
+        final[key] = {
+            x: scaledX + canvasCenterX,
+            y: scaledY + canvasCenterY
+        };
+    }
+
+    return final;
 }
 
 export function drawCoachModel(
@@ -63,23 +95,12 @@ export function drawCoachModel(
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
     if (canvasWidth === 0 || canvasHeight === 0) {
-        console.warn('Canvas dimensions are zero, skipping draw');
         return;
     }
 
     drawGroundPlane(ctx, canvasWidth, canvasHeight, camera);
 
     const centered = centerPoseOnCanvas(pose, canvasWidth, canvasHeight, camera);
-
-    const allPointsValid = Object.values(centered).every(point =>
-        isFinite(point.x) && isFinite(point.y) &&
-        point.x >= -canvasWidth && point.x <= canvasWidth * 2 &&
-        point.y >= -canvasHeight && point.y <= canvasHeight * 2
-    );
-
-    if (!allPointsValid) {
-        console.warn('Some projected points are outside visible bounds or invalid');
-    }
 
     drawShadow(ctx, centered, canvasWidth, canvasHeight);
 
@@ -211,47 +232,18 @@ function drawGroundPlane(
     canvasHeight: number,
     camera: CameraConfig
 ): void {
-    const groundY = canvasHeight * 0.85;
+    const groundY = canvasHeight * 0.90;
 
     ctx.save();
-    ctx.globalAlpha = 0.15;
+    ctx.globalAlpha = 0.1;
 
-    const gradient = ctx.createLinearGradient(0, groundY - 100, 0, canvasHeight);
+    const gradient = ctx.createLinearGradient(0, groundY - 50, 0, canvasHeight);
     gradient.addColorStop(0, 'rgba(0, 217, 255, 0)');
-    gradient.addColorStop(0.5, 'rgba(0, 217, 255, 0.2)');
+    gradient.addColorStop(0.5, 'rgba(0, 217, 255, 0.15)');
     gradient.addColorStop(1, 'rgba(0, 217, 255, 0.05)');
 
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, groundY - 50, canvasWidth, canvasHeight - groundY + 50);
-
-    ctx.strokeStyle = 'rgba(0, 217, 255, 0.3)';
-    ctx.lineWidth = 2;
-
-    const perspectiveFactor = Math.abs(camera.rotationY) / 90;
-    const gridSpacing = 60;
-    const numLines = 8;
-
-    for (let i = -numLines; i <= numLines; i++) {
-        const offset = i * gridSpacing;
-        const perspectiveOffset = offset * (0.5 + perspectiveFactor * 0.5);
-
-        ctx.globalAlpha = 0.1 + (1 - Math.abs(i) / numLines) * 0.1;
-
-        ctx.beginPath();
-        ctx.moveTo(canvasWidth / 2 + perspectiveOffset, groundY);
-        ctx.lineTo(canvasWidth / 2 + offset, canvasHeight);
-        ctx.stroke();
-
-        if (i % 2 === 0) {
-            const y = groundY + (Math.abs(i) * 15);
-            if (y < canvasHeight) {
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(canvasWidth, y);
-                ctx.stroke();
-            }
-        }
-    }
+    ctx.fillRect(0, groundY - 30, canvasWidth, canvasHeight - groundY + 30);
 
     ctx.restore();
 }
@@ -264,31 +256,28 @@ function drawShadow(
 ): void {
     const leftAnkle = centered['LEFT_ANKLE'];
     const rightAnkle = centered['RIGHT_ANKLE'];
-    const leftHip = centered['LEFT_HIP'];
-    const rightHip = centered['RIGHT_HIP'];
 
-    if (!leftAnkle || !rightAnkle || !leftHip || !rightHip) return;
+    if (!leftAnkle || !rightAnkle) return;
 
-    const shadowY = canvasHeight * 0.85;
-    const hipY = (leftHip.y + rightHip.y) / 2;
+    const shadowY = canvasHeight * 0.90;
     const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
 
     const heightFromGround = shadowY - ankleY;
-    const shadowScale = Math.max(0.3, 1 - (heightFromGround / canvasHeight) * 0.5);
+    const shadowScale = Math.max(0.2, Math.min(1, 1 - (heightFromGround / canvasHeight) * 0.3));
 
     ctx.save();
-    ctx.globalAlpha = 0.25 * shadowScale;
+    ctx.globalAlpha = 0.2 * shadowScale;
 
     const centerX = (leftAnkle.x + rightAnkle.x) / 2;
-    const width = Math.abs(rightAnkle.x - leftAnkle.x) * 1.5;
-    const height = width * 0.4;
+    const width = Math.abs(rightAnkle.x - leftAnkle.x) * 1.8;
+    const height = width * 0.35;
 
     const gradient = ctx.createRadialGradient(
         centerX, shadowY, 0,
         centerX, shadowY, width
     );
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
-    gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.3)');
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+    gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.25)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
     ctx.fillStyle = gradient;
