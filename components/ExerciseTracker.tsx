@@ -292,11 +292,20 @@ const ExerciseTracker: React.FC = () => {
   };
 
   const handleStart = async () => {
+    console.log('=== START WORKOUT BUTTON CLICKED ===');
+
     try {
+      console.log('Initializing audio context from user interaction...');
       await initializeAudioContext();
-      console.log('Audio context initialized');
+      console.log('✓ Audio context initialized successfully');
+
+      // Show audio confirmation
+      setFeedback({ message: 'Audio system ready!', type: 'success' });
+      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
-      console.error('Failed to initialize audio context:', error);
+      console.error('✗ Failed to initialize audio context:', error);
+      setFeedback({ message: 'Warning: Audio may not work. Check browser permissions.', type: 'warning' });
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     if (lastPoseRef.current) {
@@ -333,6 +342,7 @@ const ExerciseTracker: React.FC = () => {
       setRepCount(0);
       setFeedback({ message: 'Workout started! I\'m watching your form', type: 'success' });
 
+      console.log('Adding welcome message to voice queue...');
       voiceFeedbackQueue.addFeedback({
         message: 'Let\'s begin! I\'ll guide you through each rep',
         priority: 'important',
@@ -456,23 +466,31 @@ const ExerciseTracker: React.FC = () => {
         </div>
 
         <div className="absolute top-4 right-4 bg-gray-900 bg-opacity-90 backdrop-blur-md px-6 py-4 rounded-xl border-2 border-green-500">
-          <div className="flex items-center gap-4">
-            <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider">Reps</div>
-              <div className="text-5xl font-bold text-white">{repCount}</div>
-            </div>
-            <div className="w-px h-14 bg-gray-600"></div>
-            <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider">Set</div>
-              <div className="text-3xl font-bold text-white">{currentSet}</div>
-            </div>
-            <div className="w-px h-14 bg-gray-600"></div>
-            <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider">Phase</div>
-              <div className={`text-sm font-bold px-3 py-1 rounded-full ${phaseColors[currentPhase]} text-white uppercase tracking-wide`}>
-                {currentPhase}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-4">
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-wider">Reps</div>
+                <div className="text-5xl font-bold text-white">{repCount}</div>
+              </div>
+              <div className="w-px h-14 bg-gray-600"></div>
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-wider">Set</div>
+                <div className="text-3xl font-bold text-white">{currentSet}</div>
+              </div>
+              <div className="w-px h-14 bg-gray-600"></div>
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-wider">Phase</div>
+                <div className={`text-sm font-bold px-3 py-1 rounded-full ${phaseColors[currentPhase]} text-white uppercase tracking-wide`}>
+                  {currentPhase}
+                </div>
               </div>
             </div>
+            {isSpeaking && (
+              <div className="flex items-center justify-center gap-2 bg-green-600 bg-opacity-80 px-3 py-1 rounded-lg animate-pulse">
+                <VolumeIcon className="w-4 h-4 text-white" />
+                <span className="text-white font-semibold text-xs">Coach Speaking</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

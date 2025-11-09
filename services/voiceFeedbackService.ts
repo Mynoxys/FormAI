@@ -15,17 +15,21 @@ class VoiceFeedbackQueue {
   private isSpeaking: boolean = false;
   private lastSpokenMessages: Map<string, number> = new Map();
   private readonly THROTTLE_DURATION = 3000;
-  private currentAudio: HTMLAudioElement | null = null;
+  private currentAudioSource: AudioBufferSourceNode | null = null;
 
   async addFeedback(feedback: VoiceFeedback) {
     const now = Date.now();
     const lastSpoken = this.lastSpokenMessages.get(feedback.message) || 0;
 
+    console.log('[Voice Queue] Adding feedback:', feedback.message, 'Priority:', feedback.priority);
+
     if (now - lastSpoken < this.THROTTLE_DURATION) {
+      console.log('[Voice Queue] Throttled - message spoken recently');
       return;
     }
 
     if (feedback.priority === 'critical') {
+      console.log('[Voice Queue] Critical priority - interrupting current speech');
       this.queue.unshift(feedback);
       if (this.isSpeaking) {
         this.stopCurrentSpeech();
@@ -33,6 +37,7 @@ class VoiceFeedbackQueue {
       await this.processQueue();
     } else {
       this.queue.push(feedback);
+      console.log('[Voice Queue] Queue length:', this.queue.length);
       if (!this.isSpeaking) {
         await this.processQueue();
       }
@@ -41,6 +46,7 @@ class VoiceFeedbackQueue {
 
   private async processQueue() {
     if (this.queue.length === 0 || this.isSpeaking) {
+      console.log('[Voice Queue] Cannot process - queue empty or already speaking');
       return;
     }
 
@@ -59,36 +65,58 @@ class VoiceFeedbackQueue {
 
     this.isSpeaking = true;
     this.lastSpokenMessages.set(feedback.message, Date.now());
-    console.log('Processing feedback:', feedback.message, 'Priority:', feedback.priority);
+    console.log('[Voice Queue] ▶ Processing feedback:', feedback.message, 'Priority:', feedback.priority);
 
     try {
-      await generateSpeech(feedback.message);
+      const audioSource = await generateSpeech(feedback.message);
+      this.currentAudioSource = audioSource;
+      console.log('[Voice Queue] Audio source stored:', audioSource !== null);
+
+      // Wait a bit before processing next item
       await new Promise(resolve => setTimeout(resolve, 300));
     } catch (error) {
-      console.error('Error speaking feedback:', error);
+      console.error('[Voice Queue] ✗ Error speaking feedback:', error);
     } finally {
       this.isSpeaking = false;
+      this.currentAudioSource = null;
+      console.log('[Voice Queue] ■ Finished processing. Queue length:', this.queue.length);
+
       if (this.queue.length > 0) {
+        console.log('[Voice Queue] Processing next item in queue...');
         this.processQueue();
       }
     }
   }
 
   private stopCurrentSpeech() {
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio = null;
+    console.log('[Voice Queue] ■ Stopping current speech');
+    if (this.currentAudioSource) {
+      try {
+        this.currentAudioSource.stop();
+        console.log('[Voice Queue] Audio source stopped');
+      } catch (e) {
+        console.warn('[Voice Queue] Could not stop audio source:', e);
+      }
+      this.currentAudioSource = null;
     }
     this.isSpeaking = false;
   }
 
   clear() {
+    console.log('[Voice Queue] Clearing queue. Current length:', this.queue.length);
     this.queue = [];
     this.stopCurrentSpeech();
   }
 
   getQueueLength(): number {
     return this.queue.length;
+  }
+
+  getStatus(): { queueLength: number; isSpeaking: boolean } {
+    return {
+      queueLength: this.queue.length,
+      isSpeaking: this.isSpeaking,
+    };
   }
 }
 
