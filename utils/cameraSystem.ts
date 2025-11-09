@@ -14,32 +14,32 @@ export const CAMERA_PRESETS: Record<CameraAngle, CameraConfig> = {
         angle: 'front',
         rotationY: 0,
         rotationX: 0,
-        distance: 2.5,
-        fov: 600,
+        distance: 1.2,
+        fov: 800,
         tilt: 0
     },
     'side': {
         angle: 'side',
         rotationY: 90,
         rotationX: 0,
-        distance: 3.0,
-        fov: 500,
+        distance: 1.5,
+        fov: 700,
         tilt: -5
     },
     'three-quarter': {
         angle: 'three-quarter',
         rotationY: 45,
         rotationX: 10,
-        distance: 2.8,
-        fov: 550,
+        distance: 1.4,
+        fov: 750,
         tilt: -8
     },
     'dynamic': {
         angle: 'dynamic',
         rotationY: 35,
         rotationX: 8,
-        distance: 2.7,
-        fov: 530,
+        distance: 1.3,
+        fov: 730,
         tilt: -10
     }
 };
@@ -54,8 +54,8 @@ export function getCameraForSquatPhase(progress: number, selectedAngle: CameraAn
             angle: 'dynamic',
             rotationY: 35,
             rotationX: 5,
-            distance: 2.6,
-            fov: 540,
+            distance: 1.3,
+            fov: 740,
             tilt: -5
         };
     } else if (progress < 0.55) {
@@ -63,8 +63,8 @@ export function getCameraForSquatPhase(progress: number, selectedAngle: CameraAn
             angle: 'dynamic',
             rotationY: 60,
             rotationX: 12,
-            distance: 2.9,
-            fov: 510,
+            distance: 1.5,
+            fov: 710,
             tilt: -12
         };
     } else if (progress < 0.85) {
@@ -72,8 +72,8 @@ export function getCameraForSquatPhase(progress: number, selectedAngle: CameraAn
             angle: 'dynamic',
             rotationY: 55,
             rotationX: 8,
-            distance: 2.7,
-            fov: 525,
+            distance: 1.4,
+            fov: 725,
             tilt: -10
         };
     } else {
@@ -81,8 +81,8 @@ export function getCameraForSquatPhase(progress: number, selectedAngle: CameraAn
             angle: 'dynamic',
             rotationY: 40,
             rotationX: 5,
-            distance: 2.6,
-            fov: 535,
+            distance: 1.3,
+            fov: 735,
             tilt: -6
         };
     }
@@ -136,9 +136,9 @@ export function projectWithPerspective(
     const distanceFactor = camera.distance;
 
     const adjustedZ = (point.z * distanceFactor) + distanceFactor;
-    const fov = perspective / (perspective + adjustedZ * 100);
+    const fov = perspective / (perspective + adjustedZ * 50);
 
-    const scale = 0.9;
+    const scale = 1.1;
     const projectedX = point.x * canvasWidth * scale * fov;
     const projectedY = point.y * canvasHeight * scale * fov;
 

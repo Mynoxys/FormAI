@@ -7,7 +7,7 @@ function centerPoseOnCanvas(
     canvasHeight: number,
     camera: CameraConfig
 ): Record<string, Point2D> {
-    const scale = 0.85;
+    const scale = 1.5;
 
     const allLandmarks: Point3D[] = Object.values(pose);
 
@@ -40,7 +40,7 @@ function centerPoseOnCanvas(
         const point3D: Point3D = {
             x: relativeX,
             y: relativeY,
-            z: landmark.z || 0
+            z: (landmark.z || 0) * scaleFactor
         };
 
         const rotated = rotatePoint3D(point3D, camera.rotationY, camera.rotationX);
@@ -62,11 +62,28 @@ export function drawCoachModel(
 ): void {
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
+    if (canvasWidth === 0 || canvasHeight === 0) {
+        console.warn('Canvas dimensions are zero, skipping draw');
+        return;
+    }
+
     drawGroundPlane(ctx, canvasWidth, canvasHeight, camera);
 
     const centered = centerPoseOnCanvas(pose, canvasWidth, canvasHeight, camera);
 
+    const allPointsValid = Object.values(centered).every(point =>
+        isFinite(point.x) && isFinite(point.y) &&
+        point.x >= -canvasWidth && point.x <= canvasWidth * 2 &&
+        point.y >= -canvasHeight && point.y <= canvasHeight * 2
+    );
+
+    if (!allPointsValid) {
+        console.warn('Some projected points are outside visible bounds or invalid');
+    }
+
     drawShadow(ctx, centered, canvasWidth, canvasHeight);
+
+    ctx.save();
 
     const connections: [string, string][] = [
         ['LEFT_SHOULDER', 'RIGHT_SHOULDER'],
@@ -185,6 +202,7 @@ export function drawCoachModel(
     }
 
     ctx.shadowBlur = 0;
+    ctx.restore();
 }
 
 function drawGroundPlane(

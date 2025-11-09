@@ -365,6 +365,8 @@ const ExerciseTracker: React.FC = () => {
             return;
         }
 
+        coachCtx.clearRect(0, 0, coachCanvas.width, coachCanvas.height);
+
         if (selectedExercise === 'squat') {
             const progress = calculateSquatProgress(timestamp, 6000);
             const currentKeyframe = interpolateKeyframes(SQUAT_KEYFRAMES, progress);

@@ -117,10 +117,10 @@ export const SQUAT_KEYFRAMES: SquatKeyframe[] = [
 
 const BODY_PROPORTIONS = {
     totalHeight: 1.0,
-    shoulderToHipRatio: 0.30,
-    hipToKneeRatio: 0.25,
-    kneeToAnkleRatio: 0.25,
-    shoulderWidth: 0.20,
+    shoulderToHipRatio: 0.35,
+    hipToKneeRatio: 0.30,
+    kneeToAnkleRatio: 0.30,
+    shoulderWidth: 0.24,
     footRotation: 7,
     armBend: 25
 };
@@ -164,7 +164,7 @@ function calculateJointPosition(
 
 export function generateBiomechanicalSquatPose(keyframe: SquatKeyframe): BiomechanicalSquatPose {
     const centerX = 0.5;
-    const baseY = 0.1;
+    const baseY = 0.05;
     const props = BODY_PROPORTIONS;
 
     const shoulderWidth = props.shoulderWidth;
@@ -180,8 +180,8 @@ export function generateBiomechanicalSquatPose(keyframe: SquatKeyframe): Biomech
     const hipLift = Math.abs(keyframe.kneeAngle - 175) / 175;
     const depthFactor = 1 - (keyframe.kneeAngle - 110) / (175 - 110);
 
-    const ankleY = baseY + 0.75;
-    const ankleZ = -0.02;
+    const ankleY = baseY + 0.70;
+    const ankleZ = 0.0;
 
     const shinLength = props.kneeToAnkleRatio;
     const kneeForward = Math.sin(ankleAngleRad) * shinLength * 0.3;
@@ -205,12 +205,12 @@ export function generateBiomechanicalSquatPose(keyframe: SquatKeyframe): Biomech
     const leftAnkle = createLandmark(centerX - ankleWidth / 2, ankleY, ankleZ);
     const rightAnkle = createLandmark(centerX + ankleWidth / 2, ankleY, ankleZ);
 
-    const leftHeel = createLandmark(centerX - ankleWidth / 2, ankleY + 0.02, ankleZ - 0.05);
-    const rightHeel = createLandmark(centerX + ankleWidth / 2, ankleY + 0.02, ankleZ - 0.05);
+    const leftHeel = createLandmark(centerX - ankleWidth / 2, ankleY + 0.03, ankleZ - 0.08);
+    const rightHeel = createLandmark(centerX + ankleWidth / 2, ankleY + 0.03, ankleZ - 0.08);
 
-    const footIndexOffset = 0.06;
-    const leftFootIndex = createLandmark(centerX - ankleWidth / 2, ankleY + 0.01, ankleZ + footIndexOffset);
-    const rightFootIndex = createLandmark(centerX + ankleWidth / 2, ankleY + 0.01, ankleZ + footIndexOffset);
+    const footIndexOffset = 0.10;
+    const leftFootIndex = createLandmark(centerX - ankleWidth / 2, ankleY + 0.02, ankleZ + footIndexOffset);
+    const rightFootIndex = createLandmark(centerX + ankleWidth / 2, ankleY + 0.02, ankleZ + footIndexOffset);
 
     const leftKnee = createLandmark(centerX - kneeWidth / 2, kneeY, kneeZ);
     const rightKnee = createLandmark(centerX + kneeWidth / 2, kneeY, kneeZ);
