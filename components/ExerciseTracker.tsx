@@ -1,9 +1,10 @@
-
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { interpolatePose, calculatePoseSimilarity } from '../utils/poseUtils';
+import { interpolatePose, centerPoseInCanvas } from '../utils/poseUtils';
 import { PoseLandmarks, Feedback, ExerciseType, Landmark } from '../types';
 import { generateSpeech } from '../services/geminiService';
 import { ChevronLeftIcon } from './Icons';
+import { SquatDetector, SquatPhase } from '../utils/squatAnalysis';
+import { createRealisticSquatAnimation } from '../utils/animationUtils';
 
 declare global {
     interface Window {
@@ -16,21 +17,19 @@ declare global {
 }
 
 const landmarkNames = [
-    'NOSE', 'LEFT_EYE_INNER', 'LEFT_EYE', 'LEFT_EYE_OUTER', 'RIGHT_EYE_INNER', 'RIGHT_EYE', 'RIGHT_EYE_OUTER', 
-    'LEFT_EAR', 'RIGHT_EAR', 'MOUTH_LEFT', 'MOUTH_RIGHT', 'LEFT_SHOULDER', 'RIGHT_SHOULDER', 'LEFT_ELBOW', 
-    'RIGHT_ELBOW', 'LEFT_WRIST', 'RIGHT_WRIST', 'LEFT_PINKY', 'RIGHT_PINKY', 'LEFT_INDEX', 'RIGHT_INDEX', 
-    'LEFT_THUMB', 'RIGHT_THUMB', 'LEFT_HIP', 'RIGHT_HIP', 'LEFT_KNEE', 'RIGHT_KNEE', 'LEFT_ANKLE', 
+    'NOSE', 'LEFT_EYE_INNER', 'LEFT_EYE', 'LEFT_EYE_OUTER', 'RIGHT_EYE_INNER', 'RIGHT_EYE', 'RIGHT_EYE_OUTER',
+    'LEFT_EAR', 'RIGHT_EAR', 'MOUTH_LEFT', 'MOUTH_RIGHT', 'LEFT_SHOULDER', 'RIGHT_SHOULDER', 'LEFT_ELBOW',
+    'RIGHT_ELBOW', 'LEFT_WRIST', 'RIGHT_WRIST', 'LEFT_PINKY', 'RIGHT_PINKY', 'LEFT_INDEX', 'RIGHT_INDEX',
+    'LEFT_THUMB', 'RIGHT_THUMB', 'LEFT_HIP', 'RIGHT_HIP', 'LEFT_KNEE', 'RIGHT_KNEE', 'LEFT_ANKLE',
     'RIGHT_ANKLE', 'LEFT_HEEL', 'RIGHT_HEEL', 'LEFT_FOOT_INDEX', 'RIGHT_FOOT_INDEX'
 ];
 
-// --- FOCUSED BODY SKELETON DEFINITIONS ---
 const BODY_LANDMARK_INDICES = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
 const BODY_CONNECTIONS: [number, number][] = [
-    [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], 
+    [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23],
     [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]
 ];
 
-// --- EXERCISE DEFINITIONS FOR VIRTUAL COACH ---
 const createNormalizedPose = (poseData: Record<string, {x: number, y: number}>): Record<string, Landmark> => {
     const pose: Record<string, Landmark> = {};
     for(const key in poseData) {
@@ -43,44 +42,44 @@ const EXERCISE_CONFIG: Record<ExerciseType, any> = {
     squat: {
         name: 'Squats',
         upPose: createNormalizedPose({
-            LEFT_SHOULDER: { x: 0.65, y: 0.3 }, RIGHT_SHOULDER: { x: 0.35, y: 0.3 },
-            LEFT_HIP: { x: 0.6, y: 0.5 }, RIGHT_HIP: { x: 0.4, y: 0.5 },
-            LEFT_KNEE: { x: 0.62, y: 0.7 }, RIGHT_KNEE: { x: 0.38, y: 0.7 },
-            LEFT_ANKLE: { x: 0.65, y: 0.9 }, RIGHT_ANKLE: { x: 0.35, y: 0.9 },
-            LEFT_ELBOW: { x: 0.75, y: 0.4 }, RIGHT_ELBOW: { x: 0.25, y: 0.4 },
-            LEFT_WRIST: { x: 0.8, y: 0.5 }, RIGHT_WRIST: { x: 0.2, y: 0.5 },
-            LEFT_EAR: { x: 0.7, y: 0.2 }, RIGHT_EAR: { x: 0.3, y: 0.2 }
+            LEFT_SHOULDER: { x: 0.45, y: 0.25 }, RIGHT_SHOULDER: { x: 0.55, y: 0.25 },
+            LEFT_HIP: { x: 0.45, y: 0.45 }, RIGHT_HIP: { x: 0.55, y: 0.45 },
+            LEFT_KNEE: { x: 0.45, y: 0.7 }, RIGHT_KNEE: { x: 0.55, y: 0.7 },
+            LEFT_ANKLE: { x: 0.45, y: 0.95 }, RIGHT_ANKLE: { x: 0.55, y: 0.95 },
+            LEFT_ELBOW: { x: 0.35, y: 0.35 }, RIGHT_ELBOW: { x: 0.65, y: 0.35 },
+            LEFT_WRIST: { x: 0.3, y: 0.45 }, RIGHT_WRIST: { x: 0.7, y: 0.45 },
+            LEFT_EAR: { x: 0.47, y: 0.18 }, RIGHT_EAR: { x: 0.53, y: 0.18 }
         }),
         downPose: createNormalizedPose({
-            LEFT_SHOULDER: { x: 0.65, y: 0.45 }, RIGHT_SHOULDER: { x: 0.35, y: 0.45 },
-            LEFT_HIP: { x: 0.6, y: 0.65 }, RIGHT_HIP: { x: 0.4, y: 0.65 },
-            LEFT_KNEE: { x: 0.68, y: 0.8 }, RIGHT_KNEE: { x: 0.32, y: 0.8 },
-            LEFT_ANKLE: { x: 0.7, y: 0.95 }, RIGHT_ANKLE: { x: 0.3, y: 0.95 },
-            LEFT_ELBOW: { x: 0.75, y: 0.55 }, RIGHT_ELBOW: { x: 0.25, y: 0.55 },
-            LEFT_WRIST: { x: 0.8, y: 0.65 }, RIGHT_WRIST: { x: 0.2, y: 0.65 },
-            LEFT_EAR: { x: 0.7, y: 0.35 }, RIGHT_EAR: { x: 0.3, y: 0.35 }
+            LEFT_SHOULDER: { x: 0.45, y: 0.4 }, RIGHT_SHOULDER: { x: 0.55, y: 0.4 },
+            LEFT_HIP: { x: 0.45, y: 0.65 }, RIGHT_HIP: { x: 0.55, y: 0.65 },
+            LEFT_KNEE: { x: 0.42, y: 0.8 }, RIGHT_KNEE: { x: 0.58, y: 0.8 },
+            LEFT_ANKLE: { x: 0.4, y: 0.95 }, RIGHT_ANKLE: { x: 0.6, y: 0.95 },
+            LEFT_ELBOW: { x: 0.35, y: 0.5 }, RIGHT_ELBOW: { x: 0.65, y: 0.5 },
+            LEFT_WRIST: { x: 0.3, y: 0.6 }, RIGHT_WRIST: { x: 0.7, y: 0.6 },
+            LEFT_EAR: { x: 0.47, y: 0.32 }, RIGHT_EAR: { x: 0.53, y: 0.32 }
         }),
         relevantLandmarks: ['LEFT_SHOULDER', 'RIGHT_SHOULDER', 'LEFT_HIP', 'RIGHT_HIP', 'LEFT_KNEE', 'RIGHT_KNEE', 'LEFT_ANKLE', 'RIGHT_ANKLE']
     },
     pushup: {
         name: 'Push-ups',
         upPose: createNormalizedPose({
-            LEFT_SHOULDER: { x: 0.4, y: 0.5 }, RIGHT_SHOULDER: { x: 0.4, y: 0.5 },
-            LEFT_HIP: { x: 0.6, y: 0.5 }, RIGHT_HIP: { x: 0.6, y: 0.5 },
-            LEFT_KNEE: { x: 0.8, y: 0.5 }, RIGHT_KNEE: { x: 0.8, y: 0.5 },
-            LEFT_ANKLE: { x: 0.95, y: 0.5 }, RIGHT_ANKLE: { x: 0.95, y: 0.5 },
-            LEFT_ELBOW: { x: 0.4, y: 0.65 }, RIGHT_ELBOW: { x: 0.4, y: 0.65 },
-            LEFT_WRIST: { x: 0.4, y: 0.8 }, RIGHT_WRIST: { x: 0.4, y: 0.8 },
-            LEFT_EAR: { x: 0.35, y: 0.45 }, RIGHT_EAR: { x: 0.35, y: 0.45 },
+            LEFT_SHOULDER: { x: 0.3, y: 0.5 }, RIGHT_SHOULDER: { x: 0.3, y: 0.5 },
+            LEFT_HIP: { x: 0.5, y: 0.5 }, RIGHT_HIP: { x: 0.5, y: 0.5 },
+            LEFT_KNEE: { x: 0.7, y: 0.5 }, RIGHT_KNEE: { x: 0.7, y: 0.5 },
+            LEFT_ANKLE: { x: 0.9, y: 0.5 }, RIGHT_ANKLE: { x: 0.9, y: 0.5 },
+            LEFT_ELBOW: { x: 0.3, y: 0.65 }, RIGHT_ELBOW: { x: 0.3, y: 0.65 },
+            LEFT_WRIST: { x: 0.3, y: 0.8 }, RIGHT_WRIST: { x: 0.3, y: 0.8 },
+            LEFT_EAR: { x: 0.25, y: 0.45 }, RIGHT_EAR: { x: 0.25, y: 0.45 },
         }),
         downPose: createNormalizedPose({
-            LEFT_SHOULDER: { x: 0.4, y: 0.7 }, RIGHT_SHOULDER: { x: 0.4, y: 0.7 },
-            LEFT_HIP: { x: 0.6, y: 0.7 }, RIGHT_HIP: { x: 0.6, y: 0.7 },
-            LEFT_KNEE: { x: 0.8, y: 0.7 }, RIGHT_KNEE: { x: 0.8, y: 0.7 },
-            LEFT_ANKLE: { x: 0.95, y: 0.7 }, RIGHT_ANKLE: { x: 0.95, y: 0.7 },
-            LEFT_ELBOW: { x: 0.5, y: 0.75 }, RIGHT_ELBOW: { x: 0.5, y: 0.75 },
-            LEFT_WRIST: { x: 0.4, y: 0.8 }, RIGHT_WRIST: { x: 0.4, y: 0.8 },
-            LEFT_EAR: { x: 0.35, y: 0.65 }, RIGHT_EAR: { x: 0.35, y: 0.65 },
+            LEFT_SHOULDER: { x: 0.3, y: 0.7 }, RIGHT_SHOULDER: { x: 0.3, y: 0.7 },
+            LEFT_HIP: { x: 0.5, y: 0.7 }, RIGHT_HIP: { x: 0.5, y: 0.7 },
+            LEFT_KNEE: { x: 0.7, y: 0.7 }, RIGHT_KNEE: { x: 0.7, y: 0.7 },
+            LEFT_ANKLE: { x: 0.9, y: 0.7 }, RIGHT_ANKLE: { x: 0.9, y: 0.7 },
+            LEFT_ELBOW: { x: 0.4, y: 0.75 }, RIGHT_ELBOW: { x: 0.4, y: 0.75 },
+            LEFT_WRIST: { x: 0.3, y: 0.8 }, RIGHT_WRIST: { x: 0.3, y: 0.8 },
+            LEFT_EAR: { x: 0.25, y: 0.65 }, RIGHT_EAR: { x: 0.25, y: 0.65 },
         }),
         relevantLandmarks: ['LEFT_SHOULDER', 'LEFT_ELBOW', 'LEFT_WRIST', 'LEFT_HIP', 'LEFT_KNEE', 'LEFT_ANKLE']
     }
@@ -90,11 +89,11 @@ const drawStickman = (ctx: CanvasRenderingContext2D, pose: Partial<PoseLandmarks
     const landmarkList = landmarkNames.map(name => pose[name as keyof PoseLandmarks]);
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 8;
     ctx.lineCap = 'round';
 
     if (window.drawConnectors) {
-        window.drawConnectors(ctx, landmarkList, BODY_CONNECTIONS, { color, lineWidth: 6 });
+        window.drawConnectors(ctx, landmarkList, BODY_CONNECTIONS, { color, lineWidth: 8 });
     }
 
     const leftShoulder = landmarkList[11];
@@ -106,7 +105,7 @@ const drawStickman = (ctx: CanvasRenderingContext2D, pose: Partial<PoseLandmarks
         const shoulderCenterX = (leftShoulder.x + rightShoulder.x) / 2;
         const shoulderCenterY = (leftShoulder.y + rightShoulder.y) / 2;
         const shoulderWidth = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
-        const headRadius = shoulderWidth > 5 ? shoulderWidth * 0.4 : 20;
+        const headRadius = shoulderWidth > 10 ? shoulderWidth * 0.5 : 25;
         const headCenterY = (leftEar && rightEar) ? (leftEar.y + rightEar.y) / 2 : shoulderCenterY - headRadius * 1.5;
         ctx.beginPath();
         ctx.arc(shoulderCenterX, headCenterY, headRadius, 0, 2 * Math.PI);
@@ -120,27 +119,31 @@ const ExerciseTracker: React.FC = () => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const coachCanvasRef = useRef<HTMLCanvasElement>(null);
-    
+
     const [feedback, setFeedback] = useState<Feedback>({ message: 'Select an exercise!', type: 'info' });
     const [formMatch, setFormMatch] = useState(0);
     const [selectedExercise, setSelectedExercise] = useState<ExerciseType | null>(null);
     const [isCoachActive, setIsCoachActive] = useState(false);
+    const [repCount, setRepCount] = useState(0);
+    const [currentPhase, setCurrentPhase] = useState<SquatPhase>('standing');
+    const [currentSet, setCurrentSet] = useState(1);
+    const [targetReps] = useState(10);
 
     const poseRef = useRef<any>(null);
     const coachAnimationIdRef = useRef<number>();
     const lastPoseRef = useRef<PoseLandmarks | null>(null);
-    const userProportionsRef = useRef<{ torsoHeight: number } | null>(null);
     const genericCoachPoseRef = useRef<Partial<PoseLandmarks>>({});
     const lastSpokenMsgRef = useRef('');
     const speakTimeoutRef = useRef<NodeJS.Timeout>();
     const onResultsLogicRef = useRef((_results: any) => {});
+    const squatDetectorRef = useRef(new SquatDetector());
 
     const speakFeedback = useCallback(async (message: string) => {
         if (message && message !== lastSpokenMsgRef.current) {
             lastSpokenMsgRef.current = message;
             await generateSpeech(message);
             if (speakTimeoutRef.current) clearTimeout(speakTimeoutRef.current);
-            speakTimeoutRef.current = setTimeout(() => { lastSpokenMsgRef.current = ''; }, 2000);
+            speakTimeoutRef.current = setTimeout(() => { lastSpokenMsgRef.current = ''; }, 3000);
         }
     }, []);
 
@@ -150,7 +153,7 @@ const ExerciseTracker: React.FC = () => {
             const canvasCtx = canvasRef.current.getContext('2d');
             const canvas = canvasRef.current;
             if (!canvasCtx) return;
-            
+
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
             canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
@@ -158,36 +161,57 @@ const ExerciseTracker: React.FC = () => {
             if (results.poseLandmarks) {
                 const allLandmarks = results.poseLandmarks;
                 const bodyLandmarks = BODY_LANDMARK_INDICES.map(i => allLandmarks[i]);
-                window.drawConnectors(canvasCtx, allLandmarks, BODY_CONNECTIONS, { color: '#4F46E5', lineWidth: 4 });
-                window.drawLandmarks(canvasCtx, bodyLandmarks, { color: '#EC4899', radius: 4 });
-                
+                window.drawConnectors(canvasCtx, allLandmarks, BODY_CONNECTIONS, { color: '#10B981', lineWidth: 4 });
+                window.drawLandmarks(canvasCtx, bodyLandmarks, { color: '#3B82F6', radius: 5 });
+
                 const landmarks: PoseLandmarks = allLandmarks.reduce((acc: any, lm: any, i: number) => {
                     acc[landmarkNames[i]] = lm;
                     return acc;
                 }, {} as PoseLandmarks);
                 lastPoseRef.current = landmarks;
 
-                if(isCoachActive && selectedExercise) {
-                    const config = EXERCISE_CONFIG[selectedExercise];
-                    const similarity = calculatePoseSimilarity(landmarks, genericCoachPoseRef.current, config.relevantLandmarks);
-                    setFormMatch(similarity);
+                if(isCoachActive && selectedExercise === 'squat') {
+                    const detector = squatDetectorRef.current;
+                    const formAnalysis = detector.analyzeForm(landmarks);
+                    const { phase, repCompleted, repDuration } = detector.detectPhase(landmarks);
 
-                    let newFeedback: Feedback;
-                    if (similarity > 90) newFeedback = { message: 'Excellent Match!', type: 'success' };
-                    else if (similarity > 70) newFeedback = { message: 'Good, keep following!', type: 'info' };
-                    else newFeedback = { message: 'Focus on the coach', type: 'warning' };
-                    
-                    if (newFeedback.message !== feedback.message) {
-                        setFeedback(newFeedback);
-                        if (similarity < 70) {
-                           speakFeedback('Match the coach.');
+                    setFormMatch(formAnalysis.overallScore);
+                    setCurrentPhase(phase);
+
+                    if (repCompleted) {
+                        const newRepCount = detector.getRepCount();
+                        setRepCount(newRepCount);
+                        speakFeedback(`${newRepCount} reps`);
+
+                        if (newRepCount >= targetReps) {
+                            speakFeedback(`Set ${currentSet} complete!`);
+                        }
+                    }
+
+                    detector.addFormScore(formAnalysis.overallScore);
+
+                    if (formAnalysis.feedback.length > 0) {
+                        const primaryFeedback = formAnalysis.feedback[0];
+                        setFeedback({ message: primaryFeedback, type: formAnalysis.overallScore > 70 ? 'warning' : 'warning' });
+                        if (formAnalysis.overallScore < 60) {
+                            speakFeedback(primaryFeedback);
+                        }
+                    } else {
+                        if (phase === 'standing') {
+                            setFeedback({ message: 'Ready - Start your squat', type: 'info' });
+                        } else if (phase === 'descending') {
+                            setFeedback({ message: 'Going down - Good!', type: 'success' });
+                        } else if (phase === 'bottom') {
+                            setFeedback({ message: 'Hold and push up!', type: 'info' });
+                        } else if (phase === 'ascending') {
+                            setFeedback({ message: 'Push through heels!', type: 'success' });
                         }
                     }
                 }
             }
             canvasCtx.restore();
         };
-    }, [isCoachActive, selectedExercise, speakFeedback, feedback.message]);
+    }, [isCoachActive, selectedExercise, speakFeedback, currentSet, targetReps]);
 
     const stableOnResults = useCallback((results: any) => {
         onResultsLogicRef.current(results);
@@ -204,44 +228,22 @@ const ExerciseTracker: React.FC = () => {
         if (!coachCtx) return;
 
         const config = EXERCISE_CONFIG[selectedExercise];
-        const animationDuration = 4000;
-        const progress = (timestamp % animationDuration) / animationDuration;
-        const t = (Math.sin(progress * 2 * Math.PI - Math.PI / 2) + 1) / 2;
+        const t = createRealisticSquatAnimation(timestamp, 4000);
 
         const genericAnimatedPose = interpolatePose(config.upPose, config.downPose, t);
         genericCoachPoseRef.current = genericAnimatedPose;
 
-        const gPose = genericAnimatedPose;
-        if (!gPose.LEFT_SHOULDER || !gPose.RIGHT_SHOULDER || !gPose.LEFT_HIP || !gPose.RIGHT_HIP) {
-            coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
-            return;
-        }
-
-        const gShoulderY = (gPose.LEFT_SHOULDER.y + gPose.RIGHT_SHOULDER.y) / 2;
-        const gHipY = (gPose.LEFT_HIP.y + gPose.RIGHT_HIP.y) / 2;
-        const gTorsoHeight = Math.abs(gShoulderY - gHipY);
-
-        const scale = coachCanvas.height * 0.8;
-
-        const finalCoachPose: Partial<PoseLandmarks> = {};
-        for (const key in genericAnimatedPose) {
-            const lm = genericAnimatedPose[key as keyof PoseLandmarks]!;
-            finalCoachPose[key as keyof PoseLandmarks] = {
-                ...lm,
-                x: lm.x * scale,
-                y: lm.y * scale
-            };
-        }
+        const centeredPose = centerPoseInCanvas(genericAnimatedPose, coachCanvas.width, coachCanvas.height, 1.2);
 
         coachCtx.clearRect(0, 0, coachCanvas.width, coachCanvas.height);
-        drawStickman(coachCtx, finalCoachPose, '#00FFFF');
+        drawStickman(coachCtx, centeredPose, '#00D9FF');
 
         coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
     }, [selectedExercise]);
 
     useEffect(() => {
         if (!selectedExercise) return;
-        
+
         const canvas = canvasRef.current;
         if (canvas && canvas.parentElement) {
             canvas.width = canvas.parentElement.clientWidth;
@@ -280,61 +282,67 @@ const ExerciseTracker: React.FC = () => {
             if (speakTimeoutRef.current) clearTimeout(speakTimeoutRef.current);
         };
     }, [selectedExercise, stableOnResults]);
-    
+
     const handleSelectExercise = (exercise: ExerciseType) => {
         setSelectedExercise(exercise);
-        setFeedback({ message: 'Get in position and start!', type: 'info' });
+        setFeedback({ message: 'Position yourself and press Start!', type: 'info' });
+        setRepCount(0);
+        setCurrentPhase('standing');
+        squatDetectorRef.current.reset();
         if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
         setTimeout(() => {
             coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
         }, 100);
     };
 
-    const handleRecalibrate = () => {
+    const handleStart = () => {
         if (lastPoseRef.current) {
             const userPose = lastPoseRef.current;
-            const { LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP } = userPose;
+            const { LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE } = userPose;
 
             if (
-                !LEFT_SHOULDER || !RIGHT_SHOULDER || !LEFT_HIP || !RIGHT_HIP ||
-                (LEFT_SHOULDER.visibility ?? 0) < 0.7 ||
-                (RIGHT_SHOULDER.visibility ?? 0) < 0.7 ||
-                (LEFT_HIP.visibility ?? 0) < 0.7 ||
-                (RIGHT_HIP.visibility ?? 0) < 0.7
+                !LEFT_SHOULDER || !RIGHT_SHOULDER || !LEFT_HIP || !RIGHT_HIP || !LEFT_KNEE || !RIGHT_KNEE || !LEFT_ANKLE || !RIGHT_ANKLE ||
+                (LEFT_SHOULDER.visibility ?? 0) < 0.6 ||
+                (RIGHT_SHOULDER.visibility ?? 0) < 0.6 ||
+                (LEFT_HIP.visibility ?? 0) < 0.6 ||
+                (RIGHT_HIP.visibility ?? 0) < 0.6 ||
+                (LEFT_KNEE.visibility ?? 0) < 0.6 ||
+                (RIGHT_KNEE.visibility ?? 0) < 0.6
             ) {
-                setFeedback({ message: 'Cannot see your full body. Adjust your position.', type: 'warning' });
+                setFeedback({ message: 'Step back - I need to see your full body!', type: 'warning' });
+                speakFeedback('Step back so I can see your full body');
                 return;
             }
 
-            const shoulderMidY = (LEFT_SHOULDER.y + RIGHT_SHOULDER.y) / 2;
-            const hipMidY = (LEFT_HIP.y + RIGHT_HIP.y) / 2;
-            userProportionsRef.current = { torsoHeight: Math.abs(shoulderMidY - hipMidY) };
-            
             setIsCoachActive(true);
-            setFeedback({ message: 'Follow the coach!', type: 'info' });
+            squatDetectorRef.current.reset();
+            setRepCount(0);
+            setFeedback({ message: 'Great! Follow the coach!', type: 'success' });
+            speakFeedback('Go! Follow the coach');
             if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
             coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
         } else {
-            setFeedback({ message: 'Could not detect pose. Make sure you are visible.', type: 'warning' });
+            setFeedback({ message: 'Cannot detect you. Check camera!', type: 'warning' });
         }
     };
-    
+
     const handleStop = () => {
         setIsCoachActive(false);
         setSelectedExercise(null);
         setFeedback({ message: 'Select an exercise!', type: 'info' });
         setFormMatch(0);
+        setRepCount(0);
         if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
     };
 
     if (!selectedExercise) {
         return (
-            <div className="flex-grow flex flex-col items-center justify-center p-4">
-                <h2 className="text-3xl font-bold mb-8">Choose Your Exercise</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
+            <div className="flex-grow flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+                <h2 className="text-4xl font-bold mb-12 text-white">Choose Your Exercise</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-2xl">
                     {Object.entries(EXERCISE_CONFIG).map(([key, { name }]) => (
                         <button key={key} onClick={() => handleSelectExercise(key as ExerciseType)}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 px-4 rounded-lg text-xl transition-transform transform hover:scale-105">
+                            className="bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold py-10 px-6 rounded-2xl text-2xl transition-all transform hover:scale-105 shadow-2xl border-2 border-blue-400">
                             {name}
                         </button>
                     ))}
@@ -343,42 +351,75 @@ const ExerciseTracker: React.FC = () => {
         );
     }
 
+    const phaseColors: Record<SquatPhase, string> = {
+        standing: 'bg-gray-600',
+        descending: 'bg-yellow-500',
+        bottom: 'bg-orange-500',
+        ascending: 'bg-green-500'
+    };
+
     const feedbackColor = { success: 'text-green-400', warning: 'text-yellow-400', info: 'text-blue-400' };
 
     return (
-        <div className="flex-grow w-full h-full flex flex-row bg-black p-2 gap-2">
-            <div className="relative w-1/2 h-full rounded-lg overflow-hidden">
+        <div className="flex-grow w-full h-full flex flex-row bg-black p-3 gap-3">
+            <div className="relative w-1/2 h-full rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700">
                 <video ref={videoRef} className="hidden" autoPlay playsInline></video>
                 <canvas ref={canvasRef} className="w-full h-full" style={{ transform: 'scaleX(-1)' }}></canvas>
-                <div className="absolute top-2 left-2 text-white bg-black bg-opacity-50 px-2 py-1 rounded">USER</div>
+                <div className="absolute top-3 left-3 text-white bg-black bg-opacity-70 px-4 py-2 rounded-lg font-bold text-sm tracking-wide">YOU</div>
             </div>
-            <div className="relative w-1/2 h-full bg-gray-800 rounded-lg overflow-hidden">
+            <div className="relative w-1/2 h-full bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl overflow-hidden shadow-2xl border-2 border-cyan-500">
                 <canvas ref={coachCanvasRef} className="w-full h-full"></canvas>
-                <div className="absolute top-2 left-2 text-white bg-black bg-opacity-50 px-2 py-1 rounded">COACH</div>
+                <div className="absolute top-3 left-3 text-cyan-400 bg-black bg-opacity-70 px-4 py-2 rounded-lg font-bold text-sm tracking-wide">AI COACH</div>
             </div>
-            
-            <button onClick={handleStop} className="absolute top-4 left-4 bg-gray-800 bg-opacity-50 p-2 rounded-full hover:bg-opacity-75 z-20">
-                <ChevronLeftIcon className="w-6 h-6 text-white" />
+
+            <button onClick={handleStop} className="absolute top-5 left-5 bg-gray-900 bg-opacity-80 p-3 rounded-full hover:bg-opacity-100 z-20 transition-all border-2 border-gray-600 hover:border-gray-400">
+                <ChevronLeftIcon className="w-7 h-7 text-white" />
             </button>
 
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-gray-900 via-gray-900 to-transparent z-10">
-                <div className="max-w-3xl mx-auto bg-gray-800 bg-opacity-80 backdrop-blur-sm rounded-lg p-4 shadow-2xl border border-gray-700">
+            <div className="absolute top-5 right-5 bg-gray-900 bg-opacity-90 backdrop-blur-md px-6 py-3 rounded-xl z-20 border-2 border-blue-500">
+                <div className="flex items-center gap-4">
+                    <div>
+                        <div className="text-xs text-gray-400 uppercase tracking-wider">Reps</div>
+                        <div className="text-4xl font-bold text-white">{repCount}</div>
+                    </div>
+                    <div className="w-px h-12 bg-gray-600"></div>
+                    <div>
+                        <div className="text-xs text-gray-400 uppercase tracking-wider">Set</div>
+                        <div className="text-2xl font-bold text-white">{currentSet}</div>
+                    </div>
+                    <div className="w-px h-12 bg-gray-600"></div>
+                    <div>
+                        <div className="text-xs text-gray-400 uppercase tracking-wider">Phase</div>
+                        <div className={`text-sm font-bold px-3 py-1 rounded-full ${phaseColors[currentPhase]} text-white uppercase tracking-wide`}>
+                            {currentPhase}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black via-gray-900 to-transparent z-10">
+                <div className="max-w-4xl mx-auto bg-gray-900 bg-opacity-95 backdrop-blur-md rounded-2xl p-6 shadow-2xl border-2 border-gray-700">
                     {!isCoachActive ? (
-                        <button onClick={handleRecalibrate} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg text-lg">
-                            Start & Calibrate
+                        <button onClick={handleStart} className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-bold py-5 px-6 rounded-xl text-xl transition-all shadow-xl">
+                            Start Workout
                         </button>
                     ) : (
                         <>
-                            <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center justify-between gap-6 mb-4">
                                 <div className="flex-grow">
-                                    <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-2">Form Match</h3>
-                                    <div className="w-full bg-gray-700 rounded-full h-4">
-                                        <div className="bg-indigo-500 h-4 rounded-full transition-all duration-300" style={{ width: `${formMatch}%` }}></div>
+                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Form Score</h3>
+                                    <div className="w-full bg-gray-800 rounded-full h-6 border border-gray-700">
+                                        <div
+                                            className={`h-6 rounded-full transition-all duration-300 ${
+                                                formMatch >= 80 ? 'bg-green-500' : formMatch >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                                            }`}
+                                            style={{ width: `${formMatch}%` }}
+                                        ></div>
                                     </div>
                                 </div>
-                                <div className="text-3xl font-bold text-white w-24 text-center">{formMatch}%</div>
+                                <div className="text-5xl font-bold text-white w-28 text-center">{formMatch}%</div>
                             </div>
-                            <p className={`mt-3 text-center font-semibold text-lg ${feedbackColor[feedback.type]}`}>{feedback.message}</p>
+                            <p className={`text-center font-bold text-xl ${feedbackColor[feedback.type]}`}>{feedback.message}</p>
                         </>
                     )}
                 </div>
