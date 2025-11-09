@@ -212,7 +212,7 @@ const Conversation: React.FC = () => {
             <div className="flex-grow flex flex-col bg-gray-800 rounded-lg p-4 overflow-y-auto space-y-4">
                 {transcriptions.map((t, i) => (
                     <div key={i} className={`flex ${t.author === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <p className={`max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-lg ${t.author === 'user' ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                        <p className={`max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-lg ${t.author === 'user' ? 'bg-green-600' : 'bg-gray-700'}`}>
                             {t.text}
                         </p>
                     </div>

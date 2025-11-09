@@ -22,7 +22,7 @@ const NavButton: React.FC<NavButtonProps> = ({
     onClick={onClick}
     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
       active
-        ? 'bg-indigo-600 text-white'
+        ? 'bg-green-600 text-white'
         : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
     }`}
   >
@@ -50,7 +50,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              Form<span className="text-indigo-400">AI</span>
+              Form<span className="text-green-400">AI</span>
             </h1>
           </div>
         </div>
