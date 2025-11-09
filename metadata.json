@@ -1,0 +1,8 @@
+{
+  "name": "Copy of FormAI – Real-Time Form Correction System",
+  "description": "An AI-powered application that uses your camera to analyze exercise form in real time, providing instant visual and spoken feedback, and automatically counting repetitions.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
