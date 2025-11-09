@@ -59,15 +59,17 @@ class VoiceFeedbackQueue {
 
     this.isSpeaking = true;
     this.lastSpokenMessages.set(feedback.message, Date.now());
+    console.log('Processing feedback:', feedback.message, 'Priority:', feedback.priority);
 
     try {
       await generateSpeech(feedback.message);
+      await new Promise(resolve => setTimeout(resolve, 300));
     } catch (error) {
       console.error('Error speaking feedback:', error);
     } finally {
       this.isSpeaking = false;
       if (this.queue.length > 0) {
-        setTimeout(() => this.processQueue(), 300);
+        this.processQueue();
       }
     }
   }

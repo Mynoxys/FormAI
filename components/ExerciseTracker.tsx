@@ -9,6 +9,7 @@ import {
   generateSetCompleteFeedback
 } from '../services/voiceFeedbackService';
 import { workoutService } from '../services/supabaseClient';
+import { initializeAudioContext } from '../services/geminiService';
 
 declare global {
   interface Window {
@@ -102,6 +103,8 @@ const ExerciseTracker: React.FC = () => {
   const [targetReps] = useState(10);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   const poseRef = useRef<any>(null);
   const lastPoseRef = useRef<PoseLandmarks | null>(null);
@@ -154,6 +157,19 @@ const ExerciseTracker: React.FC = () => {
             formScoresRef.current = formScoresRef.current.slice(-100);
           }
 
+          setDebugInfo({
+            kneeAngle: formAnalysis.kneeAngle.toFixed(1),
+            hipAngle: formAnalysis.hipAngle.toFixed(1),
+            torsoAngle: formAnalysis.torsoAngle.toFixed(1),
+            depth: formAnalysis.depth.toFixed(1),
+            visibility: {
+              leftHip: ((landmarks.LEFT_HIP?.visibility ?? 0) * 100).toFixed(0),
+              rightHip: ((landmarks.RIGHT_HIP?.visibility ?? 0) * 100).toFixed(0),
+              leftKnee: ((landmarks.LEFT_KNEE?.visibility ?? 0) * 100).toFixed(0),
+              rightKnee: ((landmarks.RIGHT_KNEE?.visibility ?? 0) * 100).toFixed(0),
+            }
+          });
+
           const formFeedback = generateFormFeedback(
             !formAnalysis.kneeAlignment,
             formAnalysis.kneesOverToes,
@@ -171,10 +187,12 @@ const ExerciseTracker: React.FC = () => {
             setIsSpeaking(true);
             setTimeout(() => setIsSpeaking(false), 2000);
           } else {
-            if (formAnalysis.overallScore >= 85) {
+            if (phase !== 'standing' && formAnalysis.overallScore >= 85) {
               setFeedback({ message: 'Excellent form!', type: 'success' });
-            } else if (formAnalysis.overallScore >= 70) {
+            } else if (phase !== 'standing' && formAnalysis.overallScore >= 70) {
               setFeedback({ message: 'Good form', type: 'success' });
+            } else if (phase === 'standing') {
+              setFeedback({ message: 'Ready for next rep', type: 'info' });
             } else {
               setFeedback({ message: 'Keep improving', type: 'info' });
             }
@@ -274,16 +292,25 @@ const ExerciseTracker: React.FC = () => {
   };
 
   const handleStart = async () => {
+    try {
+      await initializeAudioContext();
+      console.log('Audio context initialized');
+    } catch (error) {
+      console.error('Failed to initialize audio context:', error);
+    }
+
     if (lastPoseRef.current) {
       const userPose = lastPoseRef.current;
       const { LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE } = userPose;
 
       if (
         !LEFT_SHOULDER || !RIGHT_SHOULDER || !LEFT_HIP || !RIGHT_HIP || !LEFT_KNEE || !RIGHT_KNEE ||
-        (LEFT_SHOULDER.visibility ?? 0) < 0.6 ||
-        (RIGHT_SHOULDER.visibility ?? 0) < 0.6 ||
-        (LEFT_HIP.visibility ?? 0) < 0.6 ||
-        (RIGHT_HIP.visibility ?? 0) < 0.6
+        (LEFT_SHOULDER.visibility ?? 0) < 0.7 ||
+        (RIGHT_SHOULDER.visibility ?? 0) < 0.7 ||
+        (LEFT_HIP.visibility ?? 0) < 0.7 ||
+        (RIGHT_HIP.visibility ?? 0) < 0.7 ||
+        (LEFT_KNEE.visibility ?? 0) < 0.7 ||
+        (RIGHT_KNEE.visibility ?? 0) < 0.7
       ) {
         setFeedback({ message: 'Step back - I need to see your full body!', type: 'warning' });
         voiceFeedbackQueue.addFeedback({
@@ -390,18 +417,40 @@ const ExerciseTracker: React.FC = () => {
         <video ref={videoRef} className="hidden" autoPlay playsInline></video>
         <canvas ref={canvasRef} className="w-full h-full" style={{ transform: 'scaleX(-1)' }}></canvas>
 
-        <div className="absolute top-4 left-4 flex items-center gap-3">
-          <button
-            onClick={handleStop}
-            className="bg-gray-900 bg-opacity-80 p-3 rounded-full hover:bg-opacity-100 transition-all border-2 border-gray-600 hover:border-gray-400"
-          >
-            <ChevronLeftIcon className="w-6 h-6 text-white" />
-          </button>
+        <div className="absolute top-4 left-4 flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleStop}
+              className="bg-gray-900 bg-opacity-80 p-3 rounded-full hover:bg-opacity-100 transition-all border-2 border-gray-600 hover:border-gray-400"
+            >
+              <ChevronLeftIcon className="w-6 h-6 text-white" />
+            </button>
 
-          {isSpeaking && (
-            <div className="flex items-center gap-2 bg-green-600 bg-opacity-90 px-4 py-2 rounded-full">
-              <VolumeIcon className="w-5 h-5 text-white animate-pulse" />
-              <span className="text-white font-semibold text-sm">AI Coach Speaking</span>
+            <button
+              onClick={() => setShowDebug(!showDebug)}
+              className="bg-gray-900 bg-opacity-80 px-4 py-2 rounded-full hover:bg-opacity-100 transition-all border-2 border-gray-600 hover:border-gray-400 text-white text-sm font-semibold"
+            >
+              {showDebug ? 'Hide Debug' : 'Show Debug'}
+            </button>
+
+            {isSpeaking && (
+              <div className="flex items-center gap-2 bg-green-600 bg-opacity-90 px-4 py-2 rounded-full">
+                <VolumeIcon className="w-5 h-5 text-white animate-pulse" />
+                <span className="text-white font-semibold text-sm">AI Coach Speaking</span>
+              </div>
+            )}
+          </div>
+
+          {showDebug && debugInfo && (
+            <div className="bg-gray-900 bg-opacity-90 backdrop-blur-md px-4 py-3 rounded-xl border-2 border-blue-500 text-white text-xs">
+              <div className="font-bold mb-2 text-blue-400">Debug Info:</div>
+              <div>Knee Angle: {debugInfo.kneeAngle}°</div>
+              <div>Hip Angle: {debugInfo.hipAngle}°</div>
+              <div>Torso Angle: {debugInfo.torsoAngle}°</div>
+              <div>Depth: {debugInfo.depth}%</div>
+              <div className="mt-2 font-bold text-blue-400">Visibility:</div>
+              <div>L Hip: {debugInfo.visibility.leftHip}% | R Hip: {debugInfo.visibility.rightHip}%</div>
+              <div>L Knee: {debugInfo.visibility.leftKnee}% | R Knee: {debugInfo.visibility.rightKnee}%</div>
             </div>
           )}
         </div>

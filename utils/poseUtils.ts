@@ -32,7 +32,7 @@ export const calculateTorsoAngle = (shoulder: Landmark, hip: Landmark): number =
 export const checkKneeCaveIn = (leftKnee: Landmark, rightKnee: Landmark, leftAnkle: Landmark, rightAnkle: Landmark): boolean => {
     const kneeWidth = Math.abs(leftKnee.x - rightKnee.x);
     const ankleWidth = Math.abs(leftAnkle.x - rightAnkle.x);
-    return kneeWidth < ankleWidth * 0.8;
+    return kneeWidth < ankleWidth * 0.9;
 };
 
 export const checkKneesOverToes = (knee: Landmark, ankle: Landmark): boolean => {

@@ -22,10 +22,11 @@ export interface RepData {
     formScores: number[];
 }
 
-const STANDING_KNEE_THRESHOLD = 160;
-const BOTTOM_KNEE_THRESHOLD = 100;
+const STANDING_KNEE_THRESHOLD = 170;
+const BOTTOM_KNEE_THRESHOLD = 90;
 const MIN_DESCENT_DISTANCE = 0.15;
-const DEBOUNCE_FRAMES = 5;
+const DEBOUNCE_FRAMES = 8;
+const MIN_VISIBILITY = 0.7;
 
 export class SquatDetector {
     private phase: SquatPhase = 'standing';
@@ -48,9 +49,37 @@ export class SquatDetector {
         this.repStartTime = 0;
     }
 
+    private isPoseValid(pose: PoseLandmarks): boolean {
+        const requiredLandmarks = [
+            pose.LEFT_HIP, pose.RIGHT_HIP,
+            pose.LEFT_KNEE, pose.RIGHT_KNEE,
+            pose.LEFT_ANKLE, pose.RIGHT_ANKLE,
+            pose.LEFT_SHOULDER, pose.RIGHT_SHOULDER
+        ];
+
+        return requiredLandmarks.every(lm =>
+            lm && (lm.visibility ?? 0) >= MIN_VISIBILITY
+        );
+    }
+
     analyzeForm(pose: PoseLandmarks): FormAnalysis {
         const feedback: string[] = [];
-        let totalScore = 100;
+        let totalScore = 0;
+
+        if (!this.isPoseValid(pose)) {
+            return {
+                kneeAngle: 0,
+                hipAngle: 0,
+                torsoAngle: 0,
+                depth: 0,
+                kneeAlignment: false,
+                kneesOverToes: false,
+                overallScore: 0,
+                feedback: ['Cannot see full body clearly']
+            };
+        }
+
+        totalScore = 100;
 
         const leftKneeAngle = calculateKneeAngle(pose.LEFT_HIP, pose.LEFT_KNEE, pose.LEFT_ANKLE);
         const rightKneeAngle = calculateKneeAngle(pose.RIGHT_HIP, pose.RIGHT_KNEE, pose.RIGHT_ANKLE);
@@ -66,14 +95,18 @@ export class SquatDetector {
 
         const hipHeight = (pose.LEFT_HIP.y + pose.RIGHT_HIP.y) / 2;
         const kneeHeight = (pose.LEFT_KNEE.y + pose.RIGHT_KNEE.y) / 2;
-        const depth = Math.max(0, Math.min(100, ((hipHeight - kneeHeight) / 0.3) * 100));
+        const ankleHeight = (pose.LEFT_ANKLE.y + pose.RIGHT_ANKLE.y) / 2;
+
+        const legLength = Math.abs(hipHeight - ankleHeight);
+        const hipKneeDistance = hipHeight - kneeHeight;
+        const depth = legLength > 0 ? Math.max(0, Math.min(100, (hipKneeDistance / legLength) * 200)) : 0;
 
         const kneesCavedIn = checkKneeCaveIn(pose.LEFT_KNEE, pose.RIGHT_KNEE, pose.LEFT_ANKLE, pose.RIGHT_ANKLE);
         const leftKneeOverToes = checkKneesOverToes(pose.LEFT_KNEE, pose.LEFT_ANKLE);
         const rightKneeOverToes = checkKneesOverToes(pose.RIGHT_KNEE, pose.RIGHT_ANKLE);
 
         if (this.phase === 'bottom' || this.phase === 'descending') {
-            if (hipHeight > kneeHeight - 0.05) {
+            if (hipHeight > kneeHeight) {
                 feedback.push('Go deeper - hips below knees');
                 totalScore -= 15;
             }
@@ -112,6 +145,10 @@ export class SquatDetector {
     }
 
     detectPhase(pose: PoseLandmarks): { phase: SquatPhase; repCompleted: boolean; repDuration: number } {
+        if (!this.isPoseValid(pose)) {
+            return { phase: this.phase, repCompleted: false, repDuration: 0 };
+        }
+
         const leftKneeAngle = calculateKneeAngle(pose.LEFT_HIP, pose.LEFT_KNEE, pose.LEFT_ANKLE);
         const rightKneeAngle = calculateKneeAngle(pose.RIGHT_HIP, pose.RIGHT_KNEE, pose.RIGHT_ANKLE);
         const avgKneeAngle = (leftKneeAngle + rightKneeAngle) / 2;

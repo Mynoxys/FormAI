@@ -53,41 +53,64 @@ const getOutputAudioContext = () => {
     return outputAudioContext;
 }
 
+export const initializeAudioContext = async (): Promise<void> => {
+    const ctx = getOutputAudioContext();
+    if (ctx.state === 'suspended') {
+        await ctx.resume();
+    }
+};
+
 export const generateSpeech = async (text: string): Promise<void> => {
-    try {
-        const aiClient = getAIClient();
-        const response = await aiClient.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text }] }],
-            config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: { voiceName: 'Kore' },
+    return new Promise(async (resolve, reject) => {
+        try {
+            const audioContext = getOutputAudioContext();
+
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            const aiClient = getAIClient();
+            const response = await aiClient.models.generateContent({
+                model: "gemini-2.5-flash-preview-tts",
+                contents: [{ parts: [{ text }] }],
+                config: {
+                    responseModalities: [Modality.AUDIO],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: 'Kore' },
+                        },
                     },
                 },
-            },
-        });
+            });
 
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (base64Audio) {
-            const audioContext = getOutputAudioContext();
-            const audioBuffer = await decodeAudioData(
-                decode(base64Audio),
-                audioContext,
-                24000,
-                1
-            );
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-            // Fix: The start() method of AudioBufferSourceNode requires an argument in some environments.
-            // Passing 0 ensures it plays immediately and avoids a potential "Expected 1 arguments, but got 0" error.
-            source.start(0);
+            const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (base64Audio) {
+                const audioBuffer = await decodeAudioData(
+                    decode(base64Audio),
+                    audioContext,
+                    24000,
+                    1
+                );
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+
+                source.onended = () => {
+                    console.log('Audio playback completed:', text);
+                    resolve();
+                };
+
+                source.start(0);
+                console.log('Started playing audio:', text);
+            } else {
+                console.warn('No audio data received from Gemini API for:', text);
+                resolve();
+            }
+        } catch (error) {
+            console.error("Error generating speech:", error);
+            reject(error);
         }
-    } catch (error) {
-        console.error("Error generating speech:", error);
-    }
+    });
 };
 
 export const connectToLiveAPI = (callbacks: {
