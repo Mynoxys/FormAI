@@ -5,6 +5,14 @@ import { generateSpeech } from '../services/geminiService';
 import { ChevronLeftIcon } from './Icons';
 import { SquatDetector, SquatPhase } from '../utils/squatAnalysis';
 import { createRealisticSquatAnimation } from '../utils/animationUtils';
+import {
+    SQUAT_KEYFRAMES,
+    generateBiomechanicalSquatPose,
+    interpolateKeyframes,
+    calculateSquatProgress
+} from '../utils/squatBiomechanics';
+import { drawCoachModel, drawPhaseIndicator } from '../utils/coachRenderer';
+import { analyzeFormAgainstCoach, calculateMovementQuality } from '../utils/advancedFormAnalysis';
 
 declare global {
     interface Window {
@@ -137,6 +145,9 @@ const ExerciseTracker: React.FC = () => {
     const speakTimeoutRef = useRef<NodeJS.Timeout>();
     const onResultsLogicRef = useRef((_results: any) => {});
     const squatDetectorRef = useRef(new SquatDetector());
+    const [currentKeyframeName, setCurrentKeyframeName] = useState('Standing');
+    const repDurationsRef = useRef<number[]>([]);
+    const formScoresRef = useRef<number[]>([]);
 
     const speakFeedback = useCallback(async (message: string) => {
         if (message && message !== lastSpokenMsgRef.current) {
@@ -172,15 +183,14 @@ const ExerciseTracker: React.FC = () => {
 
                 if(isCoachActive && selectedExercise === 'squat') {
                     const detector = squatDetectorRef.current;
-                    const formAnalysis = detector.analyzeForm(landmarks);
                     const { phase, repCompleted, repDuration } = detector.detectPhase(landmarks);
 
-                    setFormMatch(formAnalysis.overallScore);
                     setCurrentPhase(phase);
 
                     if (repCompleted) {
                         const newRepCount = detector.getRepCount();
                         setRepCount(newRepCount);
+                        repDurationsRef.current.push(repDuration);
                         speakFeedback(`${newRepCount} reps`);
 
                         if (newRepCount >= targetReps) {
@@ -188,23 +198,43 @@ const ExerciseTracker: React.FC = () => {
                         }
                     }
 
-                    detector.addFormScore(formAnalysis.overallScore);
+                    if (genericCoachPoseRef.current && Object.keys(genericCoachPoseRef.current).length > 0) {
+                        const timestamp = Date.now();
+                        const progress = calculateSquatProgress(timestamp, 6000);
+                        const currentKeyframe = interpolateKeyframes(SQUAT_KEYFRAMES, progress);
+                        const biomechanicalPose = generateBiomechanicalSquatPose(currentKeyframe);
 
-                    if (formAnalysis.feedback.length > 0) {
-                        const primaryFeedback = formAnalysis.feedback[0];
-                        setFeedback({ message: primaryFeedback, type: formAnalysis.overallScore > 70 ? 'warning' : 'warning' });
-                        if (formAnalysis.overallScore < 60) {
-                            speakFeedback(primaryFeedback);
+                        const advancedAnalysis = analyzeFormAgainstCoach(
+                            landmarks,
+                            biomechanicalPose,
+                            currentKeyframe
+                        );
+
+                        setFormMatch(advancedAnalysis.overallScore);
+                        formScoresRef.current.push(advancedAnalysis.overallScore);
+                        if (formScoresRef.current.length > 100) {
+                            formScoresRef.current = formScoresRef.current.slice(-100);
                         }
-                    } else {
-                        if (phase === 'standing') {
-                            setFeedback({ message: 'Ready - Start your squat', type: 'info' });
-                        } else if (phase === 'descending') {
-                            setFeedback({ message: 'Going down - Good!', type: 'success' });
-                        } else if (phase === 'bottom') {
-                            setFeedback({ message: 'Hold and push up!', type: 'info' });
-                        } else if (phase === 'ascending') {
-                            setFeedback({ message: 'Push through heels!', type: 'success' });
+
+                        if (advancedAnalysis.feedback.length > 0) {
+                            const primaryFeedback = advancedAnalysis.feedback[0];
+                            setFeedback({
+                                message: primaryFeedback.message,
+                                type: primaryFeedback.severity === 'critical' ? 'warning' : 'info'
+                            });
+                            if (primaryFeedback.severity === 'critical') {
+                                speakFeedback(primaryFeedback.message);
+                            }
+                        } else {
+                            if (phase === 'standing') {
+                                setFeedback({ message: 'Excellent form - Ready for next rep', type: 'success' });
+                            } else if (phase === 'descending') {
+                                setFeedback({ message: 'Perfect descent - Keep going!', type: 'success' });
+                            } else if (phase === 'bottom') {
+                                setFeedback({ message: 'Great depth - Drive up!', type: 'success' });
+                            } else if (phase === 'ascending') {
+                                setFeedback({ message: 'Strong push - Finish it!', type: 'success' });
+                            }
                         }
                     }
                 }
@@ -225,18 +255,31 @@ const ExerciseTracker: React.FC = () => {
 
         const coachCtx = coachCanvasRef.current.getContext('2d');
         const coachCanvas = coachCanvasRef.current;
-        if (!coachCtx) return;
+        if (!coachCtx || coachCanvas.width === 0 || coachCanvas.height === 0) {
+            coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
+            return;
+        }
 
-        const config = EXERCISE_CONFIG[selectedExercise];
-        const t = createRealisticSquatAnimation(timestamp, 4000);
+        if (selectedExercise === 'squat') {
+            const progress = calculateSquatProgress(timestamp, 6000);
+            const currentKeyframe = interpolateKeyframes(SQUAT_KEYFRAMES, progress);
+            const biomechanicalPose = generateBiomechanicalSquatPose(currentKeyframe);
 
-        const genericAnimatedPose = interpolatePose(config.upPose, config.downPose, t);
-        genericCoachPoseRef.current = genericAnimatedPose;
+            setCurrentKeyframeName(currentKeyframe.name);
 
-        const centeredPose = centerPoseInCanvas(genericAnimatedPose, coachCanvas.width, coachCanvas.height, 1.2);
+            drawCoachModel(coachCtx, biomechanicalPose, coachCanvas.width, coachCanvas.height, '#00D9FF');
+            drawPhaseIndicator(coachCtx, currentKeyframe.name, progress, coachCanvas.width, coachCanvas.height);
 
-        coachCtx.clearRect(0, 0, coachCanvas.width, coachCanvas.height);
-        drawStickman(coachCtx, centeredPose, '#00D9FF');
+            genericCoachPoseRef.current = biomechanicalPose as any;
+        } else {
+            const config = EXERCISE_CONFIG[selectedExercise];
+            const t = createRealisticSquatAnimation(timestamp, 4000);
+            const genericAnimatedPose = interpolatePose(config.upPose, config.downPose, t);
+            genericCoachPoseRef.current = genericAnimatedPose;
+            const centeredPose = centerPoseInCanvas(genericAnimatedPose, coachCanvas.width, coachCanvas.height, 1.2);
+            coachCtx.clearRect(0, 0, coachCanvas.width, coachCanvas.height);
+            drawStickman(coachCtx, centeredPose, '#00D9FF');
+        }
 
         coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
     }, [selectedExercise]);
@@ -289,8 +332,17 @@ const ExerciseTracker: React.FC = () => {
         setRepCount(0);
         setCurrentPhase('standing');
         squatDetectorRef.current.reset();
+        formScoresRef.current = [];
+        repDurationsRef.current = [];
         if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
         setTimeout(() => {
+            if (coachCanvasRef.current) {
+                const canvas = coachCanvasRef.current;
+                if (canvas.parentElement) {
+                    canvas.width = canvas.parentElement.clientWidth;
+                    canvas.height = canvas.parentElement.clientHeight;
+                }
+            }
             coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
         }, 100);
     };
@@ -332,6 +384,14 @@ const ExerciseTracker: React.FC = () => {
         setFeedback({ message: 'Select an exercise!', type: 'info' });
         setFormMatch(0);
         setRepCount(0);
+
+        if (formScoresRef.current.length > 0) {
+            const quality = calculateMovementQuality(formScoresRef.current, repDurationsRef.current);
+            console.log('Workout Summary:', quality);
+        }
+
+        formScoresRef.current = [];
+        repDurationsRef.current = [];
         if (coachAnimationIdRef.current) cancelAnimationFrame(coachAnimationIdRef.current);
     };
 
