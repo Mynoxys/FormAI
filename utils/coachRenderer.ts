@@ -1,33 +1,11 @@
 import { BiomechanicalSquatPose } from './squatBiomechanics';
-
-interface Point3D {
-    x: number;
-    y: number;
-    z: number;
-}
-
-interface Point2D {
-    x: number;
-    y: number;
-}
-
-function project3DTo2D(point: Point3D, canvasWidth: number, canvasHeight: number, scale: number = 1): Point2D {
-    const perspective = 500;
-    const fov = perspective / (perspective + point.z * 100);
-
-    const projectedX = point.x * canvasWidth * scale * fov;
-    const projectedY = point.y * canvasHeight * scale * fov;
-
-    return {
-        x: projectedX,
-        y: projectedY
-    };
-}
+import { CameraConfig, rotatePoint3D, projectWithPerspective, Point3D, Point2D } from './cameraSystem';
 
 function centerPoseOnCanvas(
     pose: BiomechanicalSquatPose,
     canvasWidth: number,
-    canvasHeight: number
+    canvasHeight: number,
+    camera: CameraConfig
 ): Record<string, Point2D> {
     const scale = 0.85;
 
@@ -59,18 +37,16 @@ function centerPoseOnCanvas(
         const relativeX = (landmark.x - poseCenterX) * scaleFactor;
         const relativeY = (landmark.y - poseCenterY) * scaleFactor;
 
-        const point3D = {
+        const point3D: Point3D = {
             x: relativeX,
             y: relativeY,
             z: landmark.z || 0
         };
 
-        const point2D = project3DTo2D(point3D, 1, 1, 1);
+        const rotated = rotatePoint3D(point3D, camera.rotationY, camera.rotationX);
+        const point2D = projectWithPerspective(rotated, camera, canvasWidth, canvasHeight);
 
-        projected[key] = {
-            x: point2D.x + canvasWidth / 2,
-            y: point2D.y + canvasHeight / 2
-        };
+        projected[key] = point2D;
     }
 
     return projected;
@@ -81,11 +57,16 @@ export function drawCoachModel(
     pose: BiomechanicalSquatPose,
     canvasWidth: number,
     canvasHeight: number,
-    color: string = '#00D9FF'
+    color: string = '#00D9FF',
+    camera: CameraConfig
 ): void {
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    const centered = centerPoseOnCanvas(pose, canvasWidth, canvasHeight);
+    drawGroundPlane(ctx, canvasWidth, canvasHeight, camera);
+
+    const centered = centerPoseOnCanvas(pose, canvasWidth, canvasHeight, camera);
+
+    drawShadow(ctx, centered, canvasWidth, canvasHeight);
 
     const connections: [string, string][] = [
         ['LEFT_SHOULDER', 'RIGHT_SHOULDER'],
@@ -204,6 +185,100 @@ export function drawCoachModel(
     }
 
     ctx.shadowBlur = 0;
+}
+
+function drawGroundPlane(
+    ctx: CanvasRenderingContext2D,
+    canvasWidth: number,
+    canvasHeight: number,
+    camera: CameraConfig
+): void {
+    const groundY = canvasHeight * 0.85;
+
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+
+    const gradient = ctx.createLinearGradient(0, groundY - 100, 0, canvasHeight);
+    gradient.addColorStop(0, 'rgba(0, 217, 255, 0)');
+    gradient.addColorStop(0.5, 'rgba(0, 217, 255, 0.2)');
+    gradient.addColorStop(1, 'rgba(0, 217, 255, 0.05)');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, groundY - 50, canvasWidth, canvasHeight - groundY + 50);
+
+    ctx.strokeStyle = 'rgba(0, 217, 255, 0.3)';
+    ctx.lineWidth = 2;
+
+    const perspectiveFactor = Math.abs(camera.rotationY) / 90;
+    const gridSpacing = 60;
+    const numLines = 8;
+
+    for (let i = -numLines; i <= numLines; i++) {
+        const offset = i * gridSpacing;
+        const perspectiveOffset = offset * (0.5 + perspectiveFactor * 0.5);
+
+        ctx.globalAlpha = 0.1 + (1 - Math.abs(i) / numLines) * 0.1;
+
+        ctx.beginPath();
+        ctx.moveTo(canvasWidth / 2 + perspectiveOffset, groundY);
+        ctx.lineTo(canvasWidth / 2 + offset, canvasHeight);
+        ctx.stroke();
+
+        if (i % 2 === 0) {
+            const y = groundY + (Math.abs(i) * 15);
+            if (y < canvasHeight) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvasWidth, y);
+                ctx.stroke();
+            }
+        }
+    }
+
+    ctx.restore();
+}
+
+function drawShadow(
+    ctx: CanvasRenderingContext2D,
+    centered: Record<string, Point2D>,
+    canvasWidth: number,
+    canvasHeight: number
+): void {
+    const leftAnkle = centered['LEFT_ANKLE'];
+    const rightAnkle = centered['RIGHT_ANKLE'];
+    const leftHip = centered['LEFT_HIP'];
+    const rightHip = centered['RIGHT_HIP'];
+
+    if (!leftAnkle || !rightAnkle || !leftHip || !rightHip) return;
+
+    const shadowY = canvasHeight * 0.85;
+    const hipY = (leftHip.y + rightHip.y) / 2;
+    const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
+
+    const heightFromGround = shadowY - ankleY;
+    const shadowScale = Math.max(0.3, 1 - (heightFromGround / canvasHeight) * 0.5);
+
+    ctx.save();
+    ctx.globalAlpha = 0.25 * shadowScale;
+
+    const centerX = (leftAnkle.x + rightAnkle.x) / 2;
+    const width = Math.abs(rightAnkle.x - leftAnkle.x) * 1.5;
+    const height = width * 0.4;
+
+    const gradient = ctx.createRadialGradient(
+        centerX, shadowY, 0,
+        centerX, shadowY, width
+    );
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
+    gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.3)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(centerX, shadowY, width / 2, height / 2, 0, 0, 2 * Math.PI);
+    ctx.fill();
+
+    ctx.restore();
 }
 
 export function drawPhaseIndicator(

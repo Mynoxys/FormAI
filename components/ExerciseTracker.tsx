@@ -13,6 +13,7 @@ import {
 } from '../utils/squatBiomechanics';
 import { drawCoachModel, drawPhaseIndicator } from '../utils/coachRenderer';
 import { analyzeFormAgainstCoach, calculateMovementQuality } from '../utils/advancedFormAnalysis';
+import { CameraAngle, getCameraForSquatPhase, CAMERA_PRESETS } from '../utils/cameraSystem';
 
 declare global {
     interface Window {
@@ -93,6 +94,104 @@ const EXERCISE_CONFIG: Record<ExerciseType, any> = {
     }
 };
 
+const drawPositioningGuide = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    ctx.save();
+
+    const margin = 40;
+    const guideX = margin;
+    const guideY = margin;
+    const guideWidth = width - (margin * 2);
+    const guideHeight = height - (margin * 2);
+
+    ctx.strokeStyle = 'rgba(0, 217, 255, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 10]);
+    ctx.strokeRect(guideX, guideY, guideWidth, guideHeight);
+    ctx.setLineDash([]);
+
+    const cornerLength = 30;
+    ctx.strokeStyle = '#00D9FF';
+    ctx.lineWidth = 4;
+
+    [[guideX, guideY], [guideX + guideWidth, guideY], [guideX, guideY + guideHeight], [guideX + guideWidth, guideY + guideHeight]].forEach(([x, y], i) => {
+        ctx.beginPath();
+        if (i === 0) {
+            ctx.moveTo(x, y + cornerLength);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x + cornerLength, y);
+        } else if (i === 1) {
+            ctx.moveTo(x - cornerLength, y);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x, y + cornerLength);
+        } else if (i === 2) {
+            ctx.moveTo(x, y - cornerLength);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x + cornerLength, y);
+        } else {
+            ctx.moveTo(x - cornerLength, y);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x, y - cornerLength);
+        }
+        ctx.stroke();
+    });
+
+    ctx.fillStyle = 'rgba(0, 217, 255, 0.9)';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Position your full body within the frame', width / 2, 25);
+
+    const silhouetteHeight = guideHeight * 0.7;
+    const silhouetteY = guideY + (guideHeight - silhouetteHeight) / 2;
+    const centerX = width / 2;
+
+    ctx.strokeStyle = 'rgba(0, 217, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+
+    const headRadius = silhouetteHeight * 0.08;
+    const headY = silhouetteY + headRadius;
+    ctx.beginPath();
+    ctx.arc(centerX, headY, headRadius, 0, 2 * Math.PI);
+    ctx.stroke();
+
+    const shoulderY = headY + headRadius + 10;
+    const shoulderWidth = silhouetteHeight * 0.15;
+    ctx.beginPath();
+    ctx.moveTo(centerX - shoulderWidth, shoulderY);
+    ctx.lineTo(centerX + shoulderWidth, shoulderY);
+    ctx.stroke();
+
+    const hipY = shoulderY + silhouetteHeight * 0.25;
+    ctx.beginPath();
+    ctx.moveTo(centerX, shoulderY);
+    ctx.lineTo(centerX, hipY);
+    ctx.stroke();
+
+    const hipWidth = silhouetteHeight * 0.12;
+    ctx.beginPath();
+    ctx.moveTo(centerX - hipWidth, hipY);
+    ctx.lineTo(centerX + hipWidth, hipY);
+    ctx.stroke();
+
+    const kneeY = hipY + silhouetteHeight * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(centerX - hipWidth, hipY);
+    ctx.lineTo(centerX - hipWidth, kneeY);
+    ctx.moveTo(centerX + hipWidth, hipY);
+    ctx.lineTo(centerX + hipWidth, kneeY);
+    ctx.stroke();
+
+    const ankleY = silhouetteY + silhouetteHeight - 10;
+    ctx.beginPath();
+    ctx.moveTo(centerX - hipWidth, kneeY);
+    ctx.lineTo(centerX - hipWidth, ankleY);
+    ctx.moveTo(centerX + hipWidth, kneeY);
+    ctx.lineTo(centerX + hipWidth, ankleY);
+    ctx.stroke();
+
+    ctx.restore();
+};
+
 const drawStickman = (ctx: CanvasRenderingContext2D, pose: Partial<PoseLandmarks>, color: string) => {
     const landmarkList = landmarkNames.map(name => pose[name as keyof PoseLandmarks]);
 
@@ -148,6 +247,8 @@ const ExerciseTracker: React.FC = () => {
     const [currentKeyframeName, setCurrentKeyframeName] = useState('Standing');
     const repDurationsRef = useRef<number[]>([]);
     const formScoresRef = useRef<number[]>([]);
+    const [cameraAngle, setCameraAngle] = useState<CameraAngle>('dynamic');
+    const [showCameraControls, setShowCameraControls] = useState(false);
 
     const speakFeedback = useCallback(async (message: string) => {
         if (message && message !== lastSpokenMsgRef.current) {
@@ -168,6 +269,10 @@ const ExerciseTracker: React.FC = () => {
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
             canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+            if (!isCoachActive) {
+                drawPositioningGuide(canvasCtx, canvas.width, canvas.height);
+            }
 
             if (results.poseLandmarks) {
                 const allLandmarks = results.poseLandmarks;
@@ -267,7 +372,8 @@ const ExerciseTracker: React.FC = () => {
 
             setCurrentKeyframeName(currentKeyframe.name);
 
-            drawCoachModel(coachCtx, biomechanicalPose, coachCanvas.width, coachCanvas.height, '#00D9FF');
+            const camera = getCameraForSquatPhase(progress, cameraAngle);
+            drawCoachModel(coachCtx, biomechanicalPose, coachCanvas.width, coachCanvas.height, '#00D9FF', camera);
             drawPhaseIndicator(coachCtx, currentKeyframe.name, progress, coachCanvas.width, coachCanvas.height);
 
             genericCoachPoseRef.current = biomechanicalPose as any;
@@ -282,7 +388,7 @@ const ExerciseTracker: React.FC = () => {
         }
 
         coachAnimationIdRef.current = requestAnimationFrame(animateCoach);
-    }, [selectedExercise]);
+    }, [selectedExercise, cameraAngle]);
 
     useEffect(() => {
         if (!selectedExercise) return;
@@ -435,6 +541,37 @@ const ExerciseTracker: React.FC = () => {
             <button onClick={handleStop} className="absolute top-5 left-5 bg-gray-900 bg-opacity-80 p-3 rounded-full hover:bg-opacity-100 z-20 transition-all border-2 border-gray-600 hover:border-gray-400">
                 <ChevronLeftIcon className="w-7 h-7 text-white" />
             </button>
+
+            <div className="absolute top-5 left-20 z-20">
+                <button
+                    onClick={() => setShowCameraControls(!showCameraControls)}
+                    className="bg-gray-900 bg-opacity-80 px-4 py-2 rounded-lg hover:bg-opacity-100 transition-all border-2 border-cyan-500 text-cyan-400 font-semibold text-sm"
+                >
+                    Camera Angle
+                </button>
+                {showCameraControls && (
+                    <div className="absolute top-full mt-2 bg-gray-900 bg-opacity-95 backdrop-blur-md rounded-lg border-2 border-cyan-500 overflow-hidden shadow-xl">
+                        <div className="p-2 space-y-1">
+                            {(['front', 'side', 'three-quarter', 'dynamic'] as CameraAngle[]).map((angle) => (
+                                <button
+                                    key={angle}
+                                    onClick={() => {
+                                        setCameraAngle(angle);
+                                        setShowCameraControls(false);
+                                    }}
+                                    className={`w-full px-4 py-2 text-left text-sm font-medium rounded transition-all ${
+                                        cameraAngle === angle
+                                            ? 'bg-cyan-600 text-white'
+                                            : 'text-gray-300 hover:bg-gray-800'
+                                    }`}
+                                >
+                                    {angle === 'three-quarter' ? '3/4 View' : angle.charAt(0).toUpperCase() + angle.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             <div className="absolute top-5 right-5 bg-gray-900 bg-opacity-90 backdrop-blur-md px-6 py-3 rounded-xl z-20 border-2 border-blue-500">
                 <div className="flex items-center gap-4">
